@@ -4,8 +4,8 @@
 
 **🔗 在线体验：** https://smilegithub01.github.io/pandora-forest/
 
-![场景截图](./screenshot.png)
-<!-- 截图后保存为 screenshot.png 放在仓库根目录即可显示 -->
+![潘多拉雨林场景截图](./screenshot.png)
+<sub>▲ 实际运行画面：暮光时分的雨林，荧光植物与丁达尔光柱（Three.js 实时渲染）</sub>
 
 ## ✨ 特色
 

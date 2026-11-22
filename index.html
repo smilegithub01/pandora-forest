@@ -1,0 +1,1399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pandora · 潘多拉雨林（Three.js）</title>
+<style>
+  :root { --teal:#9ce6c8; --cyan:#7ff3e0; --ink:#dff7ec; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; overflow:hidden; background:#071714; font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif; }
+  #app { position:fixed; inset:0; }
+  #app::after { content:""; position:absolute; inset:0; pointer-events:none; mix-blend-mode:multiply;
+    background:radial-gradient(ellipse at 50% 45%, transparent 38%, rgba(2,14,12,.55) 100%); }
+  canvas { display:block; }
+  /* 极淡的胶片颗粒，让画面更有“被摄影机拍下”的质感 */
+  #grain { position:fixed; inset:0; z-index:4; pointer-events:none; opacity:.045; mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size:180px 180px; animation:grain .7s steps(4) infinite; }
+  @keyframes grain { 0%{background-position:0 0} 25%{background-position:-45px 30px} 50%{background-position:30px -40px} 75%{background-position:-25px -20px} 100%{background-position:0 0} }
+
+  /* 顶部标题 */
+  #title { position:fixed; top:22px; left:26px; z-index:5; pointer-events:none; color:var(--ink); text-shadow:0 2px 24px #000; }
+  #title h1 { margin:0; font-weight:300; font-size:22px; letter-spacing:6px; }
+  #title p { margin:6px 0 0; font-size:11px; letter-spacing:3px; color:var(--teal); opacity:.85; }
+
+  /* 控制面板 */
+  #panel { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); z-index:5; display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  #panel button {
+    appearance:none; border:1px solid rgba(156,230,200,.35); border-radius:999px;
+    padding:9px 16px; background:rgba(8,32,28,.55); color:var(--ink); font-size:12px;
+    letter-spacing:1px; cursor:pointer; backdrop-filter:blur(10px); transition:.2s;
+  }
+  #panel button:hover { background:rgba(20,70,58,.75); border-color:var(--teal); }
+  #panel button.off { opacity:.45; }
+
+  /* 图鉴卡片 */
+  #card { position:fixed; top:88px; left:26px; z-index:5; width:252px; padding:18px 20px;
+    border:1px solid rgba(156,230,200,.28); border-left:3px solid var(--cyan); border-radius:4px;
+    background:rgba(6,24,20,.72); color:var(--ink); backdrop-filter:blur(12px);
+    opacity:0; transform:translateX(-12px); transition:.35s; pointer-events:none; }
+  #card.show { opacity:1; transform:none; }
+  #card h2 { margin:0 0 4px; font-size:15px; font-weight:500; letter-spacing:2px; color:var(--cyan); }
+  #card .latin { font-size:10px; opacity:.55; letter-spacing:1px; }
+  #card p { margin:12px 0 0; font-size:12px; line-height:1.8; opacity:.85; }
+
+  #hint { position:fixed; top:24px; right:26px; z-index:5; color:var(--ink); font-size:11px; opacity:.55; text-align:right; line-height:1.9; pointer-events:none; }
+  #tag { position:fixed; bottom:92px; left:50%; transform:translateX(-50%) translateY(8px); z-index:5;
+    padding:7px 14px; border:1px solid rgba(156,230,200,.22); background:rgba(6,24,20,.55);
+    backdrop-filter:blur(8px); color:var(--ink); font-size:12px; letter-spacing:2px; opacity:0;
+    transition:.28s; pointer-events:none; white-space:nowrap; }
+  #tag.show { opacity:.95; transform:translateX(-50%) translateY(0); }
+  #tag span { color:var(--teal); font-size:10px; letter-spacing:1px; opacity:.7; margin-left:8px; }
+
+  /* 进入遮罩 */
+  #gate { position:fixed; inset:0; z-index:20; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:radial-gradient(ellipse at 50% 45%, #0d322c 0%, #04100e 75%); color:var(--ink); text-align:center; transition:opacity .8s; }
+  #gate h1 { font-weight:200; font-size:34px; letter-spacing:12px; margin:0 0 12px; text-shadow:0 0 30px #3fe0b0; }
+  #gate p { font-size:12px; letter-spacing:3px; opacity:.6; margin:0 0 34px; }
+  #enter { padding:13px 42px; border:1px solid var(--cyan); border-radius:999px; background:transparent; color:var(--cyan);
+    font-size:13px; letter-spacing:6px; cursor:pointer; transition:.3s; }
+  #enter:hover { background:var(--cyan); color:#04201b; box-shadow:0 0 36px rgba(127,243,224,.45); }
+  #gate.hide { opacity:0; pointer-events:none; }
+  /* 片头字幕：入场推镜时缓缓浮现，随后淡出 */
+  #subtitle { position:fixed; left:50%; top:63%; transform:translateX(-50%); z-index:6; pointer-events:none;
+    color:var(--ink); text-align:center; opacity:0; transition:opacity 1.2s ease; text-shadow:0 2px 20px #000; }
+  #subtitle.show { opacity:.92; }
+  #subtitle .l { font-size:22px; letter-spacing:10px; font-weight:300; }
+  #subtitle .s { margin-top:12px; font-size:11px; letter-spacing:5px; color:var(--teal); opacity:.85; }
+  #loaderr { position:fixed; inset:0; z-index:30; display:none; align-items:center; justify-content:center; padding:40px;
+    background:#04100e; color:#f0b4b4; font-size:14px; text-align:center; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app"></div>
+<div id="grain"></div>
+
+<div id="title"><h1>PANDORA</h1><p>潘多拉雨林 · 暮光时分</p></div>
+<div id="hint">拖动 · 环绕观察<br>滚轮 · 远近<br>点击动植物 · 查看图鉴</div>
+<div id="card"><h2 id="cname"></h2><div class="latin" id="clatin"></div><p id="cdesc"></p></div>
+<div id="tag"></div>
+<div id="subtitle"><div class="l">潘多拉 · 生命之森</div><div class="s">PANDORA — THE LIVING FOREST</div></div>
+
+<div id="panel">
+  <button id="b-music">♪ 背景乐</button>
+  <button id="b-amb">≈ 环境音</button>
+  <button id="b-sfx">◈ 交互音</button>
+  <button id="b-fog">◌ 雾气</button>
+  <button id="b-daynight">☾ 切换昼夜</button>
+  <button id="b-auto">↻ 自动巡游</button>
+  <button id="b-quality">◐ 画质：自动</button>
+  <button id="b-reset">⌂ 重置视角</button>
+</div>
+
+<div id="gate">
+  <h1>AVATAR · FOREST</h1>
+  <p>潘多拉星球 · 哈利路亚山脚雨林</p>
+  <button id="enter">进入雨林</button>
+</div>
+<div id="loaderr"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
+
+/* =========================================================
+   0. 基础工具：固定随机数（保证每次布局一致）
+   ========================================================= */
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+const rnd = mulberry32(20291116);
+const RR = (a,b)=>a+(b-a)*rnd();
+const TAU = Math.PI*2;
+
+/* 分形噪声地形（借鉴自 avatar-forest.html 的 hash/noise 方案，幅度收敛以适配近景） */
+function hash2(x,y){ const v=Math.sin(x*127.1+y*311.7)*43758.5453; return v-Math.floor(v); }
+function noise2(x,y){
+  const ix=Math.floor(x),iy=Math.floor(y),fx=x-ix,fy=y-iy;
+  const ux=fx*fx*(3-2*fx),uy=fy*fy*(3-2*fy);
+  const a=hash2(ix,iy),b=hash2(ix+1,iy),c=hash2(ix,iy+1),d=hash2(ix+1,iy+1);
+  return (a*(1-ux)+b*ux)*(1-uy)+(c*(1-ux)+d*ux)*uy;
+}
+function heightAt(x,z){
+  let h=0,amp=1,f=0.022;
+  for(let i=0;i<4;i++){ h+=(noise2(x*f+11,z*f-7)*2-1)*amp; amp*=.5; f*=2; }
+  const r=Math.hypot(x,z), bowl=Math.max(0,(r-38)/70)*4;
+  return -0.6+h*1.7-bowl;
+}
+
+/* 生成柔光圆点贴图（用于花粉、萤火、光晕） */
+function glowTexture(inner='rgba(255,255,255,1)', outer='rgba(255,255,255,0)'){
+  const c=document.createElement('canvas'); c.width=c.height=128;
+  const g=c.getContext('2d'); const grd=g.createRadialGradient(64,64,0,64,64,64);
+  grd.addColorStop(0,inner); grd.addColorStop(0.25,'rgba(190,255,235,.75)'); grd.addColorStop(1,outer);
+  g.fillStyle=grd; g.fillRect(0,0,128,128);
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t;
+}
+const glowMap = glowTexture();
+
+/* =========================================================
+   1. 渲染器 / 场景 / 相机 / 灯光
+   ========================================================= */
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+} catch(e){
+  document.getElementById('loaderr').style.display='flex';
+  document.getElementById('loaderr').textContent='无法初始化 WebGL：'+e.message;
+  throw e;
+}
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.35;
+document.getElementById('app').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a201f);
+scene.fog = new THREE.FogExp2(0x103a34, 0.011);
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 400);
+camera.position.set(0, 8, 12);
+
+/* 辉光后期：4× MSAA 渲染目标 + UnrealBloomPass，荧光与边缘都细腻 */
+const pr0=renderer.getPixelRatio();
+const msaaTarget=new THREE.WebGLRenderTarget(innerWidth*pr0,innerHeight*pr0,{type:THREE.HalfFloatType,samples:4});
+const composer = new EffectComposer(renderer, msaaTarget);
+composer.setSize(innerWidth,innerHeight);
+composer.addPass(new RenderPass(scene, camera));
+/* 景深：焦点锁定在观察目标，前后景柔和虚化 */
+const bokeh = new BokehPass(scene, camera, { focus: 14, aperture: 0.00012, maxblur: 0.006 });
+composer.addPass(bokeh);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 0.5, 0.7, 0.82);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+/* 电影调色：青橙分离色调 + 镜头色散 + 胶片颗粒 + 暗角 + 2.39:1 宽银幕遮幅 */
+const grade = new ShaderPass({
+  uniforms:{ tDiffuse:{value:null}, uTime:{value:0}, uAspect:{value:innerWidth/innerHeight}, uBars:{value:0} },
+  vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`uniform sampler2D tDiffuse; uniform float uTime,uAspect,uBars; varying vec2 vUv;
+    float h(vec2 p){ return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453); }
+    void main(){
+      vec2 cuv=vUv-.5; float d=length(cuv);
+      vec2 off=cuv*d*0.006;
+      vec3 c=vec3(texture2D(tDiffuse,vUv+off).r, texture2D(tDiffuse,vUv).g, texture2D(tDiffuse,vUv-off).b);
+      c=(c-.5)*1.08+.5;
+      float l=dot(c,vec3(.299,.587,.114));
+      vec3 shadowT=vec3(-.012,.03,.045), highT=vec3(.05,.025,-.02);
+      c+=mix(shadowT,highT,smoothstep(.2,.8,l))*.6;
+      c=mix(vec3(l),c,1.08);
+      c*=1.0-smoothstep(.32,.85,d)*.38;
+      c+=(h(vUv*vec2(1920.,1080.)+fract(uTime)*91.)-.5)*.03;
+      float bar=max(0.,(1.-uAspect/2.39)*.5)*uBars;
+      float m=step(bar,vUv.y)*step(vUv.y,1.-bar);
+      gl_FragColor=vec4(c*m,1.0);
+    }`
+});
+composer.addPass(grade);
+let barsTarget=0;
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.055;
+controls.minDistance = 6;
+controls.maxDistance = 70;
+controls.maxPolarAngle = Math.PI*0.495;
+controls.target.set(0, 5, 0);
+controls.autoRotateSpeed = 0.35;
+
+/* 天空穹顶：暮光渐变（借鉴 avatar-forest.html 的 shader sky） */
+const skyMat = new THREE.ShaderMaterial({
+  side:THREE.BackSide,
+  uniforms:{
+    top:{value:new THREE.Color(0x0a2c33)},
+    bottom:{value:new THREE.Color(0x1e5147)},
+    glow:{value:new THREE.Vector3(-0.6,0.35,0.4)},
+    uTime:{value:0},
+    warm:{value:new THREE.Color(0xffd9a0)}
+  },
+  vertexShader:`varying vec3 vP; void main(){ vP=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`
+    uniform vec3 top,bottom,glow,warm; uniform float uTime; varying vec3 vP;
+    float h21(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+    float n2(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
+      return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y); }
+    void main(){
+      float h=smoothstep(-0.25,0.85,vP.y);
+      vec3 c=mix(bottom,top,h);
+      c=mix(c, c*vec3(1.06,1.02,.92), pow(1.0-abs(vP.y),5.0)*.5); // 地平线暖辉
+      // 分层流云
+      vec2 uv=vP.xz/(abs(vP.y)+.35)*.55+vec2(uTime*.005,uTime*.0025);
+      float cl=n2(uv)*.5+n2(uv*2.1)*.27+n2(uv*4.3)*.13;
+      float band=smoothstep(.0,.28,vP.y)*(1.0-smoothstep(.72,1.0,vP.y));
+      float cloud=smoothstep(.5,.72,cl)*band;
+      c=mix(c, c+vec3(.16,.22,.20), cloud*.55);
+      // 日/月光晕与轮盘
+      vec3 gd=normalize(glow);
+      float g=pow(max(dot(vP,gd),0.0),20.0);
+      c+=mix(vec3(.62,1.0,.84),warm,.5)*g*.55;
+      float disc=pow(max(dot(vP,gd),0.0),850.0);
+      c+=mix(vec3(.85,1.0,.92),warm,.35)*disc*1.1;
+      gl_FragColor=vec4(c,1.0);
+    }`
+});
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(220,32,24), skyMat));
+
+const hemi = new THREE.HemisphereLight(0x9ce8cc, 0x082019, 1.5);
+scene.add(hemi);
+const moon = new THREE.DirectionalLight(0xdaf6e8, 1.85);
+moon.position.set(-24, 38, 16);
+moon.castShadow = true;
+moon.shadow.mapSize.set(2048,2048);
+moon.shadow.camera.left=-40; moon.shadow.camera.right=40;
+moon.shadow.camera.top=40; moon.shadow.camera.bottom=-40;
+moon.shadow.bias=-0.0008;
+scene.add(moon);
+const rim = new THREE.DirectionalLight(0x3fa89a, 0.7);
+rim.position.set(18, 12, -22); scene.add(rim);
+
+/* =========================================================
+   2. 地面：起伏地形 + 顶点色
+   ========================================================= */
+{
+  const geo = new THREE.PlaneGeometry(220,220,180,180);
+  geo.rotateX(-Math.PI/2);
+  const p = geo.attributes.position; const colors=[];
+  const base = new THREE.Color(0x1c3a2b), alt = new THREE.Color(0x2c573c);
+  for(let i=0;i<p.count;i++){
+    const x=p.getX(i), z=p.getZ(i);
+    p.setY(i, heightAt(x,z));
+    const c = base.clone().lerp(alt, 0.5+0.5*Math.sin(x*0.2)*Math.cos(z*0.17));
+    colors.push(c.r,c.g,c.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors,3));
+  geo.computeVertexNormals();
+  /* 手绘感地表：噪声色斑 + 苔藓斑块，让地面不再是单调色块 */
+  const groundMat = new THREE.MeshStandardMaterial({vertexColors:true, roughness:1, metalness:0});
+  groundMat.onBeforeCompile = shader=>{
+    shader.vertexShader=shader.vertexShader
+      .replace('#include <common>','#include <common>\nvarying vec3 vWorldPos;')
+      .replace('#include <begin_vertex>','#include <begin_vertex>\n vWorldPos=(modelMatrix*vec4(transformed,1.0)).xyz;');
+    shader.fragmentShader=shader.fragmentShader
+      .replace('#include <common>',`#include <common>
+        varying vec3 vWorldPos;
+        float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+        float n2(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+          return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y);}`)
+      .replace('#include <color_fragment>',`#include <color_fragment>
+        float mott=n2(vWorldPos.xz*0.55)*.6+n2(vWorldPos.xz*1.7)*.4;
+        diffuseColor.rgb*=0.90+0.20*mott;
+        float moss=smoothstep(.50,.70,n2(vWorldPos.xz*.09));
+        diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.12,.32,.19),moss*.16);`);
+  };
+  groundMat.customProgramCacheKey=()=>'painterlyGround';
+  const ground = new THREE.Mesh(geo, groundMat);
+  ground.receiveShadow = true; scene.add(ground);
+}
+
+/* =========================================================
+   3. 植被：榕树（气生根）、蕨类、荧光蘑菇、发光花
+   ========================================================= */
+const interactives = [];
+const barkMat = new THREE.MeshStandardMaterial({ color:0x4a5545, roughness:1, flatShading:true });
+const leafMat = new THREE.MeshStandardMaterial({ color:0x2c6b45, roughness:.9, emissive:0x0c2b1c, emissiveIntensity:.5, flatShading:true });
+const rootMat = new THREE.MeshStandardMaterial({ color:0x415044, roughness:1 });
+
+/* 边缘光：叶缘透出柔和的荧光描边，是绘本/赛璐璐质感的关键 */
+function addRim(mat,color,strength){
+  mat.onBeforeCompile=shader=>{
+    shader.uniforms.uRimColor={value:new THREE.Color(color)};
+    shader.uniforms.uRimStrength={value:strength};
+    shader.fragmentShader=shader.fragmentShader
+      .replace('#include <common>','#include <common>\nuniform vec3 uRimColor;\nuniform float uRimStrength;')
+      .replace('#include <emissivemap_fragment>',`#include <emissivemap_fragment>
+        float rimF=pow(1.0-max(dot(normalize(normal),normalize(vViewPosition)),0.0),3.0);
+        totalEmissiveRadiance+=uRimColor*rimF*uRimStrength;`);
+  };
+  mat.customProgramCacheKey=()=>'rim'+color+strength;
+}
+addRim(leafMat,0x7fffc4,.55);
+
+/* 接地软阴影贴图：用径向渐变模拟环境光遮蔽，让物体稳稳落在地面 */
+function shadowTexture(){
+  const c=document.createElement('canvas'); c.width=c.height=128;
+  const g=c.getContext('2d'), grd=g.createRadialGradient(64,64,2,64,64,62);
+  grd.addColorStop(0,'rgba(0,0,0,.7)'); grd.addColorStop(.5,'rgba(0,0,0,.3)'); grd.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=grd; g.fillRect(0,0,128,128);
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t;
+}
+const shadowMap=shadowTexture();
+function addBlobShadow(obj,size,y,opacity){
+  const m=new THREE.Mesh(new THREE.PlaneGeometry(size,size),
+    new THREE.MeshBasicMaterial({map:shadowMap,transparent:true,opacity:opacity||.45,depthWrite:false}));
+  m.rotation.x=-Math.PI/2; m.position.y=y||.05; obj.add(m); return m;
+}
+
+const INFO = {
+  tree:{ name:'哈利路亚巨榕', latin:'Rami caelestes · 天穹根系', desc:'潘多拉雨林的骨架。枝干垂下无数气生根，落地成柱；树冠层层叠叠，把暮光切成一缕缕绿雾。夜色里，细小的孢子随呼吸般明灭。' },
+  fern:{ name:'星脉蕨', latin:'Pteris stellaris', desc:'低矮却密集的蕨叶铺满林地。叶脉中的生物荧光在风中轻轻摇曳，为夜行小动物提供隐蔽的通道。' },
+  mushroom:{ name:'月辉菇', latin:'Lumen fungus', desc:'菌盖储存白昼的光，在暮色中泛起青蓝的冷辉。纳美族孩童常把它们当作林间路标。' },
+  flower:{ name:'幽焰花', latin:'Flamma silens', desc:'花蕊以近乎无声的节律脉动，吸引授粉的萤虫。轻点时，它会短暂地明亮起来回应你。' },
+  pali:{ name:'帕利（六足兽）', latin:'Pa\'li · 六足坐骑', desc:'温和的六足草食动物。颈项修长、步态轻盈，常在林间空地结伴漫步；受惊时会竖起尾羽迅速离开。' },
+  bird:{ name:'森林翔鸟', latin:'Avis pandorae', desc:'羽翼泛着金属般的蓝绿色光泽。它们在高处盘旋，以果实和飞虫为食，鸣声清亮如铃。' },
+  firefly:{ name:'提灯虫', latin:'Luciola pandorae', desc:'成群的发光小虫悬停在蕨丛之上，通过明暗节律彼此交流，是雨林夜空里流动的星。' }
+};
+
+function makeTree(x,z,s){
+  const g = new THREE.Group();
+  const tr = new THREE.Mesh(new THREE.CylinderGeometry(.36*s,.85*s,10*s,9,5), barkMat);
+  const tp = tr.geometry.attributes.position;
+  for(let i=0;i<tp.count;i++){
+    const y=tp.getY(i); tp.setX(i, tp.getX(i)+Math.sin(y*.45+x)*.22*s);
+    tp.setZ(i, tp.getZ(i)+Math.cos(y*.5+z)*.2*s);
+  }
+  tr.geometry.computeVertexNormals();
+  tr.position.y = 5*s; tr.castShadow = true; g.add(tr);
+  interactives.push(tr);
+  tr.userData.info = INFO.tree;
+  tr.userData.owner = g;
+
+  const canopies=[];
+  for(let i=0;i<5;i++){
+    const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(2.2*s,1), leafMat);
+    const a=i/5*TAU;
+    blob.position.set(Math.cos(a)*1.9*s, (9.4+RR(-.5,1.2))*s, Math.sin(a)*1.9*s);
+    blob.scale.set(1.2,.55,1.15); blob.castShadow=true; g.add(blob); canopies.push(blob);
+  }
+  // 气生根：从高处垂下、落地再生根
+  for(let i=0;i<6;i++){
+    const a=i/6*TAU+RR(-.2,.2), r=(3+RR(0,2))*s;
+    const pts=[ new THREE.Vector3(Math.cos(a)*.7*s,8.6*s,Math.sin(a)*.7*s),
+      new THREE.Vector3(Math.cos(a)*r*.7,6.4*s,Math.sin(a)*r*.7),
+      new THREE.Vector3(Math.cos(a)*r,2.6*s,Math.sin(a)*r),
+      new THREE.Vector3(Math.cos(a)*r*1.04,-heightAt(x,z)+heightAt(x+Math.cos(a)*r,z+Math.sin(a)*r),Math.sin(a)*r*1.04) ];
+    const curve=new THREE.CatmullRomCurve3(pts);
+    const root=new THREE.Mesh(new THREE.TubeGeometry(curve,14,.11*s,5,false),rootMat);
+    g.add(root);
+  }
+  // 树冠孢子光点
+  const cnt=28, pos=new Float32Array(cnt*3);
+  for(let i=0;i<cnt;i++){ pos[i*3]=RR(-4,4)*s; pos[i*3+1]=(9+RR(-1,2))*s; pos[i*3+2]=RR(-4,4)*s; }
+  const pg=new THREE.BufferGeometry(); pg.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  const spore=new THREE.Points(pg,new THREE.PointsMaterial({size:.28*s,map:glowMap,color:0xa9ffe0,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,opacity:.8}));
+  spore.userData.spore=true; g.add(spore);
+  g.position.set(x,heightAt(x,z),z);
+  g.userData={sway:rnd()*TAU,canopies,spore};
+  addBlobShadow(g,7*s,.06,.5);
+  scene.add(g); return g;
+}
+const trees=[];
+for(let i=0;i<14;i++){
+  const a=i/14*TAU+RR(-.12,.12), r=RR(19,40);
+  const x=Math.cos(a)*r, z=Math.sin(a)*r;
+  trees.push(makeTree(x,z,RR(.8,1.35)));
+}
+
+/* 蕨类：实例化叶片，逐帧摇摆 */
+const fernGeo = new THREE.PlaneGeometry(.5,1.6,1,4);
+fernGeo.translate(0,.8,0);
+const fernMat = new THREE.MeshStandardMaterial({
+  color:0x3f9a63, roughness:.9, side:THREE.DoubleSide, emissive:0x0c3522, emissiveIntensity:.35
+});
+addRim(fernMat,0x6fffb0,.35);
+const ferns = new THREE.InstancedMesh(fernGeo, fernMat, 900);
+const fernData=[];
+const dummy = new THREE.Object3D();
+for(let i=0;i<900;i++){
+  const r=Math.sqrt(rnd())*44, a=rnd()*TAU;
+  const x=Math.cos(a)*r, z=Math.sin(a)*r;
+  fernData.push({x,z,y:heightAt(x,z),s:RR(.45,1.5),rot:rnd()*TAU,phase:rnd()*TAU});
+}
+ferns.castShadow=true; scene.add(ferns);
+
+/* 草地：数千株草叶，风摆完全在顶点着色器中完成（塞尔达式浓密地表覆盖） */
+const windTime={value:0};
+{
+  const blades=7000;
+  /* 尖细叶片：底宽顶尖，避免方形卡片感 */
+  const geo=new THREE.BufferGeometry();
+  const gpos=[],guv=[],gidx=[],seg=4;
+  for(let i=0;i<=seg;i++){
+    const t=i/seg, w=.5*(1-t*t)*.9;
+    gpos.push(-w,t,0, w,t,0); guv.push(0,t,1,t);
+  }
+  for(let i=0;i<seg;i++){ const a=i*2; gidx.push(a,a+1,a+2, a+1,a+3,a+2); }
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(gpos,3));
+  geo.setAttribute('uv',new THREE.Float32BufferAttribute(guv,2));
+  geo.setIndex(gidx); geo.computeVertexNormals();
+  const col=[], p=geo.attributes.position, c0=new THREE.Color(0x18402a), c1=new THREE.Color(0x7ccb62);
+  for(let i=0;i<p.count;i++){ const t=p.getY(i), c=c0.clone().lerp(c1,t*t); col.push(c.r,c.g,c.b); }
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
+  const mat=new THREE.MeshStandardMaterial({vertexColors:true,side:THREE.DoubleSide,roughness:1,metalness:0});
+  mat.onBeforeCompile=shader=>{
+    shader.uniforms.uTime=windTime;
+    shader.vertexShader=shader.vertexShader
+      .replace('#include <common>','#include <common>\nuniform float uTime;')
+      .replace('#include <begin_vertex>',`#include <begin_vertex>
+        vec3 iP=vec3(instanceMatrix[3][0],instanceMatrix[3][1],instanceMatrix[3][2]);
+        float sway=sin(uTime*1.7+iP.x*.35+iP.z*.28)*.5+.5;
+        float bend=sway*.33*clamp(position.y,0.0,1.0);
+        transformed.x+=bend; transformed.z+=bend*.55;`);
+    shader.fragmentShader=shader.fragmentShader
+      .replace('#include <emissivemap_fragment>',`#include <emissivemap_fragment>
+        float rimF=pow(1.0-max(dot(normalize(normal),normalize(vViewPosition)),0.0),2.5);
+        totalEmissiveRadiance+=vec3(.10,.26,.14)*rimF*.4;`);
+  };
+  mat.customProgramCacheKey=()=>'grasswind';
+  const grass=new THREE.InstancedMesh(geo,mat,blades);
+  const o=new THREE.Object3D();
+  for(let i=0;i<blades;i++){
+    const r=Math.sqrt(rnd())*46, a=rnd()*TAU, x=Math.cos(a)*r, z=Math.sin(a)*r, s=RR(.35,1.15);
+    o.position.set(x,heightAt(x,z)-.02,z);
+    o.rotation.set(0,rnd()*TAU,0);
+    o.scale.set(s,RR(.5,1.3)*s,s); o.updateMatrix(); grass.setMatrixAt(i,o.matrix);
+    grass.setColorAt(i,new THREE.Color().setHSL(RR(.24,.36),RR(.35,.7),RR(.45,.7)));
+  }
+  grass.receiveShadow=true; scene.add(grass);
+}
+
+/* 阔叶灌丛：林下中层植被，丰富画面层次 */
+{
+  const shape=new THREE.Shape();
+  shape.moveTo(0,0);
+  shape.bezierCurveTo(.35,.25,.5,.9,0,1.6);
+  shape.bezierCurveTo(-.5,.9,-.35,.25,0,0);
+  const geo=new THREE.ShapeGeometry(shape);
+  const gp=geo.attributes.position;
+  for(let i=0;i<gp.count;i++){ const y=gp.getY(i); gp.setZ(i,Math.sin(y*1.6)*.28); }
+  geo.computeVertexNormals();
+  const mat=new THREE.MeshStandardMaterial({color:0x3f9c5a,emissive:0x0d3520,emissiveIntensity:.4,roughness:.85,side:THREE.DoubleSide});
+  addRim(mat,0x9fffc0,.4);
+  const shrubs=new THREE.InstancedMesh(geo,mat,80);
+  const o=new THREE.Object3D();
+  for(let i=0;i<80;i++){
+    const r=Math.sqrt(rnd())*40, a=rnd()*TAU, x=Math.cos(a)*r, z=Math.sin(a)*r, s=RR(.6,1.7);
+    o.position.set(x,heightAt(x,z),z);
+    o.rotation.set(RR(-.15,.15),rnd()*TAU,RR(-.2,.2));
+    o.scale.set(s,s,s); o.updateMatrix(); shrubs.setMatrixAt(i,o.matrix);
+    shrubs.setColorAt(i,new THREE.Color().setHSL(RR(.27,.4),RR(.4,.7),RR(.35,.6)));
+  }
+  shrubs.castShadow=true; scene.add(shrubs);
+}
+
+/* 荧光蘑菇 */
+const capGeo = new THREE.SphereGeometry(.55,12,8,0,TAU,0,Math.PI/2);
+const caps = new THREE.InstancedMesh(capGeo, new THREE.MeshStandardMaterial({
+  color:0x9bf6e0, emissive:0x2fbfae, emissiveIntensity:.8, roughness:.5, transparent:true, opacity:.85
+}), 90);
+const stems = new THREE.InstancedMesh(new THREE.CylinderGeometry(.12,.16,.9,6),
+  new THREE.MeshStandardMaterial({color:0xd8f4e6, roughness:.8}),90);
+const mushroomData=[];
+for(let i=0;i<90;i++){
+  const r=Math.sqrt(rnd())*36, a=rnd()*TAU, x=Math.cos(a)*r, z=Math.sin(a)*r;
+  const s=RR(.5,1.5), y=heightAt(x,z);
+  mushroomData.push({x,y,z,s,phase:rnd()*TAU});
+  dummy.position.set(x,y+.45*s,z); dummy.scale.set(s,s,s); dummy.rotation.set(0,rnd()*TAU,0); dummy.updateMatrix();
+  stems.setMatrixAt(i,dummy.matrix);
+  dummy.position.set(x,y+.9*s,z); dummy.rotation.set(0,0,0); dummy.updateMatrix();
+  caps.setMatrixAt(i,dummy.matrix);
+  caps.setColorAt(i,new THREE.Color().setHSL(RR(.36,.88),.72,RR(.55,.75)));
+}
+scene.add(stems,caps);
+interactives.push(caps); caps.userData.info=INFO.mushroom; caps.userData.owner=caps;
+// 蘑菇附近的点光（少量）
+for(let i=0;i<4;i++){
+  const m=mushroomData[i*7];
+  const pl=new THREE.PointLight(0x54f0d2,.9,9,2); pl.position.set(m.x,m.y+1.4,m.z); scene.add(pl);
+}
+
+/* 缤纷花海：五颜六色的三维花瓣 + 顶部的荧光点 */
+const FLOWER_PALETTE=[0xff5fa2,0xff8a3d,0xffd447,0xa855f7,0x4ade80,0x22d3ee,0xf472b6,0x818cf8,0xfbbf24,0xfb7185];
+const pickFlower=()=>new THREE.Color(FLOWER_PALETTE[Math.floor(rnd()*FLOWER_PALETTE.length)]);
+{
+  /* 六瓣花形：平滑的极坐标轮廓 */
+  const shape=new THREE.Shape();
+  for(let i=0;i<=72;i++){
+    const t=i/72*TAU, rad=.30+.19*Math.cos(6*t);
+    const x=Math.cos(t)*rad, y=Math.sin(t)*rad;
+    if(i===0) shape.moveTo(x,y); else shape.lineTo(x,y);
+  }
+  const geo=new THREE.ShapeGeometry(shape);
+  geo.rotateX(-Math.PI/2);
+  const mat=new THREE.MeshStandardMaterial({roughness:.7,metalness:0,side:THREE.DoubleSide});
+  mat.onBeforeCompile=shader=>{
+    shader.fragmentShader=shader.fragmentShader
+      .replace('#include <emissivemap_fragment>',`#include <emissivemap_fragment>
+        totalEmissiveRadiance+=diffuseColor.rgb*.55;
+        float rimF=pow(1.0-max(dot(normalize(normal),normalize(vViewPosition)),0.0),2.2);
+        totalEmissiveRadiance+=diffuseColor.rgb*rimF*.5;`);
+  };
+  mat.customProgramCacheKey=()=>'flowerPetals';
+  const count=260, petals=new THREE.InstancedMesh(geo,mat,count);
+  const o=new THREE.Object3D();
+  for(let i=0;i<count;i++){
+    const r=Math.sqrt(rnd())*38, a=rnd()*TAU, x=Math.cos(a)*r, z=Math.sin(a)*r, s=RR(.55,1.5);
+    o.position.set(x,heightAt(x,z)+RR(.35,1.7),z);
+    o.rotation.set(RR(-.25,.25),rnd()*TAU,RR(-.25,.25));
+    o.scale.set(s,s,s); o.updateMatrix(); petals.setMatrixAt(i,o.matrix);
+    petals.setColorAt(i,pickFlower());
+  }
+  scene.add(petals);
+  interactives.push(petals); petals.userData.info=INFO.flower; petals.userData.owner=petals;
+}
+/* 花心上方的荧光点，让花瓣在夜色中更醒目 */
+const flowerCount=170;
+const flowerGeo=new THREE.BufferGeometry(); const fp=new Float32Array(flowerCount*3), fc=new Float32Array(flowerCount*3);
+const flowerData=[];
+for(let i=0;i<flowerCount;i++){
+  const r=Math.sqrt(rnd())*38, a=rnd()*TAU, x=Math.cos(a)*r, z=Math.sin(a)*r, y=heightAt(x,z)+RR(.5,1.9);
+  fp.set([x,y,z],i*3);
+  const c=pickFlower(); fc.set([c.r,c.g,c.b],i*3);
+  flowerData.push({phase:rnd()*TAU});
+}
+flowerGeo.setAttribute('position',new THREE.BufferAttribute(fp,3));
+flowerGeo.setAttribute('color',new THREE.BufferAttribute(fc,3));
+const flowers=new THREE.Points(flowerGeo,new THREE.PointsMaterial({size:.42,map:glowMap,vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,opacity:.75}));
+scene.add(flowers);
+
+/* =========================================================
+   4. 动物：六足兽、翔鸟、提灯虫、漂浮尘埃
+   ========================================================= */
+const paliMat=new THREE.MeshStandardMaterial({color:0x6a8f80,roughness:.85,emissive:0x123c30,emissiveIntensity:.3});
+const hideMat=new THREE.MeshStandardMaterial({color:0x3f6b5e,roughness:.9});
+const pali=[];
+function makePali(phase,radius,scale){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.SphereGeometry(1,16,12),paliMat);
+  body.scale.set(1.7,.72,.85); body.position.y=2.1*scale; g.add(body);
+  const neck=new THREE.Mesh(new THREE.CylinderGeometry(.18,.32,2.1*scale,8),paliMat);
+  neck.position.set(1.2*scale,3.0*scale,0); neck.rotation.z=-.5; g.add(neck);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.42*scale,10,8),paliMat);
+  head.position.set(1.95*scale,3.9*scale,0); g.add(head);
+  const tail=new THREE.Mesh(new THREE.ConeGeometry(.28*scale,2.4*scale,6),hideMat);
+  tail.position.set(-2.2*scale,2.2*scale,0); tail.rotation.z=Math.PI/2.4; g.add(tail);
+  const legs=[];
+  for(let i=0;i<6;i++){
+    const leg=new THREE.Mesh(new THREE.CylinderGeometry(.075,.11,2.1*scale,5),hideMat);
+    const side=i%2?1:-1, row=Math.floor(i/2)-1;
+    leg.position.set(row*.95*scale,1.05*scale,side*.55*scale);
+    leg.rotation.z=side*.22; g.add(leg); legs.push({mesh:leg,phase:i*1.05});
+  }
+  g.scale.setScalar(scale); g.userData={phase,radius,legs,speed:RR(.08,.14),info:INFO.pali};
+  g.traverse(o=>{ if(o.isMesh){ o.userData.info=INFO.pali; o.userData.owner=g; interactives.push(o);} });
+  addBlobShadow(g,3.4,.05,.42);
+  scene.add(g); pali.push(g); return g;
+}
+for(let i=0;i<5;i++) makePali(i/5*TAU,RR(11,22),RR(.55,.85));
+
+const birds=[]; const birdMat=new THREE.MeshStandardMaterial({color:0x5fd3c0,emissive:0x0b4a45,emissiveIntensity:.5,side:THREE.DoubleSide,roughness:.7});
+function wingGeo(s){
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute([0,0,0, .5*s,0,.9*s, -.15*s,0,1.35*s],3));
+  g.computeVertexNormals(); return g;
+}
+function makeBird(phase,radius,height){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.SphereGeometry(.3,10,8),birdMat); body.scale.set(1.5,.7,.7); g.add(body);
+  const tail=new THREE.Mesh(new THREE.ConeGeometry(.16,.6,4),birdMat);
+  tail.position.x=-.6; tail.rotation.z=Math.PI/2; g.add(tail);
+  const wings=[];
+  for(const s of [-1,1]){
+    const w=new THREE.Mesh(wingGeo(s),birdMat);
+    w.position.set(0,.05,s*.12); wings.push({m:w,s}); g.add(w);
+  }
+  g.scale.setScalar(.8);
+  g.userData={phase,radius,height,wings,speed:RR(.12,.22),info:INFO.bird};
+  g.traverse(o=>{ if(o.isMesh){o.userData.info=INFO.bird;o.userData.owner=g;interactives.push(o);} });
+  scene.add(g); birds.push(g);
+}
+for(let i=0;i<9;i++) makeBird(i/9*TAU,RR(14,30),RR(10,18));
+
+/* 提灯虫 */
+const bugCount=260;
+const bugGeo=new THREE.BufferGeometry(); const bpos=new Float32Array(bugCount*3), bcol=new Float32Array(bugCount*3);
+const bugs=[];
+for(let i=0;i<bugCount;i++){
+  const r=Math.sqrt(rnd())*32,a=rnd()*TAU;
+  const x=Math.cos(a)*r,z=Math.sin(a)*r,y=heightAt(x,z)+RR(.8,7);
+  bugs.push({x,y,z,phase:rnd()*TAU,speed:RR(.2,.6),ax:RR(.5,2),vx:0,vy:0,vz:0});
+  bpos.set([x,y,z],i*3);
+  const c=pickFlower(); c.lerp(new THREE.Color(0x9fffe0),.45); bcol.set([c.r,c.g,c.b],i*3);
+}
+bugGeo.setAttribute('position',new THREE.BufferAttribute(bpos,3));
+bugGeo.setAttribute('color',new THREE.BufferAttribute(bcol,3));
+const fireflies=new THREE.Points(bugGeo,new THREE.PointsMaterial({size:.34,map:glowMap,vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,opacity:1}));
+scene.add(fireflies);
+
+/* 从树冠缓缓飘落的孢子（细腻的垂直层次） */
+const fallCount=140;
+const fallGeo=new THREE.BufferGeometry(), fallPos=new Float32Array(fallCount*3), fallData=[];
+for(let i=0;i<fallCount;i++){
+  const a=rnd()*TAU,r=Math.sqrt(rnd())*38;
+  fallData.push({x:Math.cos(a)*r,z:Math.sin(a)*r,y:RR(1,19),speed:RR(.18,.5),phase:rnd()*TAU});
+  fallPos.set([fallData[i].x,fallData[i].y,fallData[i].z],i*3);
+}
+fallGeo.setAttribute('position',new THREE.BufferAttribute(fallPos,3));
+const falling=new THREE.Points(fallGeo,new THREE.PointsMaterial({size:.19,map:glowMap,color:0xbdffe6,transparent:true,opacity:.55,depthWrite:false,blending:THREE.AdditiveBlending}));
+scene.add(falling);
+
+/* 漂浮尘埃 / 光柱 */
+const dustCount=400;
+const dGeo=new THREE.BufferGeometry(), dPos=new Float32Array(dustCount*3); const dust=[];
+for(let i=0;i<dustCount;i++){
+  const x=RR(-45,45),y=RR(0,26),z=RR(-45,45); dust.push({x,y,z,phase:rnd()*TAU,speed:RR(.1,.4)});
+  dPos.set([x,y,z],i*3);
+}
+dGeo.setAttribute('position',new THREE.BufferAttribute(dPos,3));
+const dustPts=new THREE.Points(dGeo,new THREE.PointsMaterial({size:.14,map:glowMap,color:0xbfe9d2,transparent:true,opacity:.35,depthWrite:false,blending:THREE.AdditiveBlending}));
+scene.add(dustPts);
+
+/* 圣树种子（Woodsprites）：水母般的纯白光点，缓缓漂浮上升 */
+const wsCount=60, wsPos=new Float32Array(wsCount*3), wsData=[];
+for(let i=0;i<wsCount;i++){
+  const a=rnd()*TAU, r=Math.sqrt(rnd())*30, x=Math.cos(a)*r, z=Math.sin(a)*r;
+  wsData.push({x,z,g:heightAt(x,z),y:RR(.5,9),spd:RR(.08,.22),phase:rnd()*TAU});
+}
+const wsGeo=new THREE.BufferGeometry(); wsGeo.setAttribute('position',new THREE.BufferAttribute(wsPos,3));
+const woodsprites=new THREE.Points(wsGeo,new THREE.PointsMaterial({size:.75,map:glowMap,color:0xf2fff8,transparent:true,opacity:.9,depthWrite:false,blending:THREE.AdditiveBlending}));
+scene.add(woodsprites);
+
+for(let i=0;i<7;i++){
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:glowMap,color:0x9fe8cf,transparent:true,opacity:.055,depthWrite:false,blending:THREE.AdditiveBlending,rotation:RR(-.35,.35)}));
+  s.position.set(RR(-25,25),RR(14,22),RR(-25,25));
+  s.scale.set(RR(4,7),RR(26,38),1); s.userData.phase=rnd()*TAU;
+  scene.add(s);
+}
+
+/* 地面薄雾：贴近地面的柔光盘，缓慢漂移 */
+const mists=[];
+for(let i=0;i<10;i++){
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:glowMap,color:0x79d6bc,transparent:true,opacity:.055,depthWrite:false,blending:THREE.AdditiveBlending}));
+  const a=rnd()*TAU, r=RR(5,34);
+  s.position.set(Math.cos(a)*r,RR(.3,1.4),Math.sin(a)*r);
+  s.scale.set(RR(10,18),RR(10,18),1); s.userData={phase:rnd()*TAU};
+  scene.add(s); mists.push(s);
+}
+
+/* =========================================================
+   4a. 电影感：体积光 / 月光光晕 / 月光溪流 / 流光蝶
+   ========================================================= */
+/* 透过树冠的月光光晕：远天的一处柔亮光源 */
+const moonHalo=new THREE.Sprite(new THREE.SpriteMaterial({
+  map:glowMap, color:0xcffff0, transparent:true, opacity:.5, depthWrite:false, blending:THREE.AdditiveBlending
+}));
+moonHalo.position.copy(new THREE.Vector3(-0.6,0.35,0.4).normalize().multiplyScalar(120));
+moonHalo.scale.set(38,38,1); scene.add(moonHalo);
+
+/* 体积光光束：从树冠缝隙倾泻而下的丁达尔光柱，中心亮、边缘柔 */
+const godrays=[];
+{
+  const proto=new THREE.ShaderMaterial({
+    uniforms:{ uColor:{value:new THREE.Color(0xc9ffe9)}, uTime:{value:0}, uOpacity:{value:.16}, uPhase:{value:0} },
+    vertexShader:`varying vec3 vN; varying vec3 vV; varying float vY;
+      void main(){ vN=normalize(normalMatrix*normal); vec4 mv=modelViewMatrix*vec4(position,1.0);
+        vV=normalize(-mv.xyz); vY=uv.y; gl_Position=projectionMatrix*mv; }`,
+    fragmentShader:`uniform vec3 uColor; uniform float uTime,uOpacity,uPhase;
+      varying vec3 vN; varying vec3 vV; varying float vY;
+      void main(){
+        float f=pow(max(dot(normalize(vN),normalize(vV)),0.0),1.6);
+        float ends=smoothstep(0.0,0.30,vY)*smoothstep(1.0,0.70,vY);
+        float pulse=.75+.25*sin(uTime*.5+vY*3.0+uPhase);
+        gl_FragColor=vec4(uColor, f*ends*pulse*uOpacity);
+      }`,
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide
+  });
+  for(let i=0;i<7;i++){
+    const mat=proto.clone(); mat.uniforms.uPhase.value=rnd()*TAU;
+    const warm=rnd()<.55, base=warm?.14:.11;
+    mat.uniforms.uColor.value.set(warm?0xffd9a0:0xbfffe4);
+    mat.uniforms.uOpacity.value=base;
+    const h=RR(9,15), rad=RR(2.2,4.4);
+    const a=rnd()*TAU, r=RR(6,30), x=Math.cos(a)*r, z=Math.sin(a)*r;
+    const m=new THREE.Mesh(new THREE.ConeGeometry(rad,h,16,1,true),mat);
+    m.position.set(x,heightAt(x,z)+.3+h*.5+RR(0,2.5),z);
+    m.rotation.set(.10,0,-.18); scene.add(m);
+    godrays.push({mesh:m,mat,phase:rnd()*TAU,baseOpacity:base});
+  }
+}
+
+/* 月光溪流： ribbon 沿地形蜿蜒，着色器生成流动水纹与粼粼波光 */
+let waterUniforms;
+{
+  const N=160, path=[];
+  for(let i=0;i<=N;i++){
+    const z=-72+i/N*144;
+    path.push({x:Math.sin(z*.055)*6.5+Math.sin(z*.14+1.2)*2.2, z});
+  }
+  const pos=[],uv=[],idx=[];
+  for(let i=0;i<=N;i++){
+    const p=path[i], w=5.0*(.85+.15*Math.sin(p.z*.1));
+    pos.push(p.x-w/2, heightAt(p.x-w/2,p.z)+.45, p.z,
+             p.x+w/2, heightAt(p.x+w/2,p.z)+.45, p.z);
+    uv.push(0, i/N*10, 1, i/N*10);
+  }
+  for(let i=0;i<N;i++){ const a=i*2; idx.push(a,a+1,a+2, a+1,a+3,a+2); }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+  geo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+  geo.setIndex(idx); geo.computeVertexNormals();
+  waterUniforms={uTime:{value:0},uColorA:{value:new THREE.Color(0x0c3a3a)},uColorB:{value:new THREE.Color(0x7ffbe4)}};
+  const mat=new THREE.ShaderMaterial({
+    uniforms:waterUniforms,
+    vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader:`uniform float uTime; uniform vec3 uColorA,uColorB; varying vec2 vUv;
+      void main(){
+        float u=vUv.x, v=vUv.y;
+        float flow=sin(v*8.0-uTime*1.6+sin(u*6.0+uTime*.7)*1.2);
+        float ripple=sin(u*18.0+uTime*2.1+sin(v*10.0)*2.0);
+        float caustic=pow(max(flow,0.0),6.0)*.45+pow(max(ripple,0.0),10.0)*.15;
+        float edge=smoothstep(0.0,.14,u)*smoothstep(1.0,.86,u);
+        float moon=exp(-pow((u-.5)*4.0,2.0))*.18;
+        vec3 col=uColorA*.30+uColorB*(caustic*.55+moon);
+        gl_FragColor=vec4(col, edge*(.28+caustic*.32));
+      }`,
+    transparent:true, depthWrite:false, side:THREE.DoubleSide, blending:THREE.AdditiveBlending
+  });
+  scene.add(new THREE.Mesh(geo,mat));
+  /* 岸边发光芦苇 */
+  const reeds=new THREE.InstancedMesh(
+    new THREE.ConeGeometry(.07,1.1,4),
+    new THREE.MeshStandardMaterial({color:0x2f8f6a,emissive:0x1a6f55,emissiveIntensity:.6,roughness:.8}),120);
+  const o=new THREE.Object3D();
+  for(let i=0;i<120;i++){
+    const p=path[Math.floor(rnd()*N)];
+    const x=p.x+(rnd()<.5?-1:1)*RR(2.0,3.2), z=p.z, s=RR(.5,1.3);
+    o.position.set(x,heightAt(x,z)+.55*s,z);
+    o.rotation.set(RR(-.12,.12),rnd()*TAU,RR(-.12,.12));
+    o.scale.set(s,s,s); o.updateMatrix(); reeds.setMatrixAt(i,o.matrix);
+  }
+  scene.add(reeds);
+}
+
+/* 流光蝶：沿花丛与溪流翩跹，可点击查看图鉴 */
+INFO.butterfly={name:'流光蝶',latin:'Papilio lucens',desc:'翅膀鳞片折射着生物荧光，沿溪流的花丛间翩跹。它们对光极为敏感，会追随着萤火与月光起舞。'};
+const butterflies=[];
+{
+  const shape=new THREE.Shape();
+  shape.moveTo(0,0); shape.quadraticCurveTo(.28,.34,.05,.62); shape.quadraticCurveTo(-.12,.34,0,0);
+  const wg=new THREE.ShapeGeometry(shape);
+  const palette=[0xff5fa2,0xffd447,0xa855f7,0x22d3ee,0x4ade80,0xff8a3d,0xf472b6,0x818cf8];
+  for(let i=0;i<16;i++){
+    const mat=new THREE.MeshStandardMaterial({color:palette[i%4],emissive:palette[i%4],emissiveIntensity:.65,roughness:.5,side:THREE.DoubleSide});
+    const g=new THREE.Group();
+    const wl=new THREE.Mesh(wg,mat), wr=new THREE.Mesh(wg,mat);
+    wl.position.x=-.02; wr.position.x=.02; wr.scale.x=-1; g.add(wl,wr);
+    const a=rnd()*TAU, rad=RR(4,18);
+    g.userData={phase:a,cx:Math.cos(a)*rad,cz:Math.sin(a)*rad,y:RR(1.6,4.6),spd:RR(.25,.5),flap:RR(9,14),wl,wr};
+    g.scale.setScalar(RR(.7,1.25)); scene.add(g); butterflies.push(g);
+    g.traverse(o=>{ if(o.isMesh){o.userData.info=INFO.butterfly;o.userData.owner=g;interactives.push(o);} });
+  }
+}
+
+/* =========================================================
+   4b. 借鉴两个版本的额外元素：岩石 / 悬浮山 / 垂藤 / 螺旋花 / 伊卡兰
+   ========================================================= */
+INFO.spiral={name:'螺旋花',latin:'Helicoradium spirale',desc:'潘多拉标志性的螺旋状植物。触碰时花蕊会卷曲收缩，随后缓缓舒展——它以此捕捉飞虫，也会对好奇的访客做出回应。'};
+
+/* 地表岩石 */
+{
+  const o=new THREE.Object3D();
+  const rocks=new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1,0),
+    new THREE.MeshStandardMaterial({color:0x3d5548,roughness:1,flatShading:true}),80);
+  for(let i=0;i<80;i++){
+    const a=rnd()*TAU,r=Math.sqrt(rnd())*42,x=Math.cos(a)*r,z=Math.sin(a)*r,s=RR(.4,1.9);
+    o.position.set(x,heightAt(x,z)+s*.2,z); o.rotation.set(rnd()*3,rnd()*3,rnd()*3);
+    o.scale.set(s,s*RR(.4,.7),s); o.updateMatrix(); rocks.setMatrixAt(i,o.matrix);
+  }
+  rocks.castShadow=true; scene.add(rocks);
+}
+
+/* 悬浮山：锥形山体 + 发光垂藤（借鉴 pandora-forest.html 的 makeIsland） */
+function makeIsland(radius,height,accent,x,y,z){
+  const g=new THREE.Group();
+  const rg=new THREE.CylinderGeometry(radius,radius*.06,height,11,4), rp=rg.attributes.position;
+  for(let i=0;i<rp.count;i++){
+    const yy=rp.getY(i),f=1-Math.abs(yy)/(height/2);
+    rp.setX(i,rp.getX(i)+RR(-.5,.5)*f); rp.setZ(i,rp.getZ(i)+RR(-.5,.5)*f);
+  }
+  rg.computeVertexNormals();
+  g.add(new THREE.Mesh(rg,new THREE.MeshStandardMaterial({color:0x24382e,roughness:1,flatShading:true,emissive:accent,emissiveIntensity:.18})));
+  const top=new THREE.Mesh(new THREE.CylinderGeometry(radius*1.02,radius*.95,.7,11),
+    new THREE.MeshStandardMaterial({color:0x2a6b4d,roughness:.9,emissive:0x0c3c2b,emissiveIntensity:.3}));
+  top.position.y=height/2; g.add(top);
+  /* 发光轮廓：让浮岛边缘在暮色中显形 */
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(radius*1.01,.13,6,28),
+    new THREE.MeshBasicMaterial({color:accent,transparent:true,opacity:.75}));
+  ring.rotation.x=Math.PI/2; ring.position.y=height/2+.2; g.add(ring);
+  for(let i=0;i<7;i++){
+    const a=RR(0,TAU),r=RR(0,radius*.7),len=RR(4,10),pts=[];
+    for(let k=0;k<=8;k++){
+      const t=k/8;
+      pts.push(new THREE.Vector3(Math.cos(a)*r+Math.sin(t*4+i)*t*.9,-height/2-t*len,Math.sin(a)*r+Math.cos(t*3+i)*t*.8));
+    }
+    const curve=new THREE.CatmullRomCurve3(pts);
+    g.add(new THREE.Mesh(new THREE.TubeGeometry(curve,20,.055,4,false),new THREE.MeshBasicMaterial({color:accent,transparent:true,opacity:.6})));
+    for(let k=2;k<9;k+=3){
+      const node=new THREE.Mesh(new THREE.SphereGeometry(.12,7,7),new THREE.MeshBasicMaterial({color:accent}));
+      node.position.copy(curve.getPoint(k/8)); g.add(node);
+    }
+  }
+  for(let i=0;i<7;i++){
+    const tuft=new THREE.Mesh(new THREE.ConeGeometry(.18,RR(.7,1.4),5),leafMat);
+    const a=RR(0,TAU),r=RR(0,radius*.85);
+    tuft.position.set(Math.cos(a)*r,height/2+.6,Math.sin(a)*r); g.add(tuft);
+  }
+  g.position.set(x,y,z); scene.add(g); return {group:g,baseY:y};
+}
+const islands=[makeIsland(6,16,0x5fe0c8,-38,26,-58), makeIsland(4.5,12,0x7ad9ff,36,32,-74)];
+
+/* 树冠垂藤 */
+for(const t of trees){
+  for(let i=0;i<2;i++){
+    const a=RR(0,TAU),r=RR(1.6,3),h=RR(4,7);
+    const pts=[new THREE.Vector3(Math.cos(a)*r,8.6,Math.sin(a)*r),
+      new THREE.Vector3(Math.cos(a)*r*1.1,8.6-h*.55,Math.sin(a)*r*1.1),
+      new THREE.Vector3(Math.cos(a)*r*.85,8.6-h,Math.sin(a)*r*.85)];
+    const curve=new THREE.CatmullRomCurve3(pts);
+    t.add(new THREE.Mesh(new THREE.TubeGeometry(curve,14,.05,4,false),rootMat));
+    const tip=new THREE.Mesh(new THREE.SphereGeometry(.12,7,7),new THREE.MeshBasicMaterial({color:0x8fffe0}));
+    tip.position.copy(curve.getPoint(1)); t.add(tip);
+  }
+}
+
+/* 螺旋花：触碰卷曲 */
+const spirals=[];
+for(let i=0;i<7;i++){
+  const color=FLOWER_PALETTE[(i*3)%FLOWER_PALETTE.length];
+  const pts=[];
+  for(let k=0;k<=60;k++){
+    const t=k/60,ang=t*Math.PI*6,r=1.05*(1-t)+.05;
+    pts.push(new THREE.Vector3(Math.cos(ang)*r,t*2.5,Math.sin(ang)*r));
+  }
+  const mat=new THREE.MeshStandardMaterial({color,emissive:color,emissiveIntensity:1.1,roughness:.4});
+  const g=new THREE.Group();
+  const tube=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),72,.08,5,false),mat);
+  g.add(tube);
+  const core=new THREE.Mesh(new THREE.SphereGeometry(.16,8,8),new THREE.MeshBasicMaterial({color:0xdffff5}));
+  core.position.y=2.5; g.add(core);
+  const a=rnd()*TAU,r=RR(5,26),x=Math.cos(a)*r,z=Math.sin(a)*r;
+  g.position.set(x,heightAt(x,z),z); g.scale.setScalar(RR(.7,1.3)); scene.add(g);
+  const hit=new THREE.Mesh(new THREE.SphereGeometry(1.4,8,6),new THREE.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false}));
+  hit.position.y=1.4; hit.userData={info:INFO.spiral,owner:g,spiral:{tube,core,mat,coil:0,target:0,phase:rnd()*TAU}};
+  g.add(hit); interactives.push(hit);
+  spirals.push(hit.userData.spiral);
+}
+
+/* 远空伊卡兰滑翔剪影 */
+const ikrans=[];
+for(let i=0;i<2;i++){
+  const g=new THREE.Group();
+  const mat=new THREE.MeshStandardMaterial({color:0x0d2733,emissive:0x123c4d,emissiveIntensity:.5,roughness:.9,side:THREE.DoubleSide});
+  const body=new THREE.Mesh(new THREE.ConeGeometry(.3,2,6),mat); body.rotation.x=Math.PI/2; g.add(body);
+  const sh=new THREE.Shape();
+  sh.moveTo(0,0); sh.lineTo(4,.6); sh.lineTo(3.2,-.2); sh.lineTo(2,-.5); sh.lineTo(0,-.3); sh.lineTo(0,0);
+  const wg=new THREE.ShapeGeometry(sh);
+  const wl=new THREE.Mesh(wg,mat); wl.rotation.x=-Math.PI/2; g.add(wl);
+  const wr=new THREE.Mesh(wg,mat); wr.rotation.x=-Math.PI/2; wr.scale.x=-1; g.add(wr);
+  g.scale.setScalar(i?1.1:.85); scene.add(g);
+  ikrans.push({group:g,wl,wr,phase:i*3,r:14,spd:.08,y:i?34:30});
+}
+
+/* =========================================================
+   5. 声音：全程序化生成（背景乐 / 环境音 / 交互音）
+   ========================================================= */
+const Sound = {
+  ctx:null, ready:false,
+  init(){
+    if(this.ready) return;
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC) return;
+    const ctx=this.ctx=new AC();
+    this.master=ctx.createGain(); this.master.gain.value=.85; this.master.connect(ctx.destination);
+    const conv=ctx.createConvolver(); conv.buffer=this.impulse(2.4);
+    const wet=ctx.createGain(); wet.gain.value=.28; conv.connect(wet); wet.connect(this.master);
+    this.music=ctx.createGain(); this.music.gain.value=0; this.music.connect(this.master); this.music.connect(conv);
+    this.amb=ctx.createGain(); this.amb.gain.value=0; this.amb.connect(this.master); this.amb.connect(conv);
+    this.sfx=ctx.createGain(); this.sfx.gain.value=.9; this.sfx.connect(this.master); this.sfx.connect(conv);
+    this.startMusic(); this.startAmb();
+    this.ready=true;
+    this.set(STATE.music,STATE.amb,true);
+    if(ctx.state==='suspended') ctx.resume();
+  },
+  impulse(sec){
+    const ctx=this.ctx,b=ctx.createBuffer(2,ctx.sampleRate*sec,ctx.sampleRate);
+    for(let c=0;c<2;c++){const d=b.getChannelData(c);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,2.6);}
+    return b;
+  },
+  noise(sec){
+    const ctx=this.ctx,b=ctx.createBuffer(1,ctx.sampleRate*sec,ctx.sampleRate),d=b.getChannelData(0);
+    let last=0; for(let i=0;i<d.length;i++){const w=Math.random()*2-1;last=(last+.02*w)/1.02;d[i]=last*3.2;}
+    return b;
+  },
+  startMusic(){
+    const ctx=this.ctx, filter=ctx.createBiquadFilter(); filter.type='lowpass'; filter.frequency.value=1100;
+    filter.connect(this.music);
+    [110,164.81,220,277.18,329.63].forEach((f,i)=>{
+      const o=ctx.createOscillator(); o.type=i%2?'sine':'triangle'; o.frequency.value=f;
+      const g=ctx.createGain(); g.gain.value=.055/(1+i*.35);
+      const lfo=ctx.createOscillator(); lfo.frequency.value=.05+i*.013;
+      const lg=ctx.createGain(); lg.gain.value=.018; lfo.connect(lg); lg.connect(g.gain); lfo.start();
+      o.connect(g); g.connect(filter); o.start();
+    });
+    setInterval(()=>{ if(!STATE.music||!this.ctx) return;
+      const f=[440,554.37,659.25,880][Math.floor(Math.random()*4)];
+      this.bell(f,.1,this.music,2.8);
+    },5200);
+  },
+  startAmb(){
+    const ctx=this.ctx;
+    const src=ctx.createBufferSource(); src.buffer=this.noise(3); src.loop=true;
+    const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=380;
+    const g=ctx.createGain(); g.gain.value=.15;
+    src.connect(lp); lp.connect(g); g.connect(this.amb); src.start();
+    const lfo=ctx.createOscillator(); lfo.frequency.value=.07;
+    const lg=ctx.createGain(); lg.gain.value=.07; lfo.connect(lg); lg.connect(g.gain); lfo.start();
+    // 虫鸣：短促高频颤音
+    setInterval(()=>{ if(!STATE.amb||!this.ctx) return;
+      const t=this.ctx.currentTime,o=this.ctx.createOscillator(),gg=this.ctx.createGain();
+      o.type='sine'; o.frequency.value=RR(2400,3600);
+      gg.gain.setValueAtTime(0,t); gg.gain.linearRampToValueAtTime(.035,t+.01);
+      gg.gain.exponentialRampToValueAtTime(.0001,t+.16);
+      o.connect(gg); gg.connect(this.amb); o.start(t); o.stop(t+.2);
+    },700);
+    // 树叶沙沙：带通噪声
+    setInterval(()=>{ if(!STATE.amb||!this.ctx) return;
+      const t=this.ctx.currentTime,s=this.ctx.createBufferSource(); s.buffer=this.noise(.7);
+      const bp=this.ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=RR(900,2200); bp.Q.value=.7;
+      const gg=this.ctx.createGain(); gg.gain.setValueAtTime(0,t); gg.gain.linearRampToValueAtTime(.07,t+.12);
+      gg.gain.exponentialRampToValueAtTime(.0001,t+.65);
+      s.connect(bp); bp.connect(gg); gg.connect(this.amb); s.start(t); s.stop(t+.7);
+    },2300);
+    // 水滴
+    setInterval(()=>{ if(!STATE.amb||!this.ctx||Math.random()>.6) return;
+      const t=this.ctx.currentTime,o=this.ctx.createOscillator(),gg=this.ctx.createGain();
+      o.type='sine'; o.frequency.setValueAtTime(RR(900,1400),t); o.frequency.exponentialRampToValueAtTime(RR(300,500),t+.12);
+      gg.gain.setValueAtTime(.09,t); gg.gain.exponentialRampToValueAtTime(.0001,t+.22);
+      o.connect(gg); gg.connect(this.amb); o.start(t); o.stop(t+.25);
+    },3400);
+    // 远处鸟鸣：按飞鸟位置做左右声像，声音来源随镜头移动
+    setInterval(()=>{ if(!STATE.amb||!this.ctx||!birds.length) return;
+      const b=birds[Math.floor(Math.random()*birds.length)];
+      this.spatial(1400+Math.random()*1200,.035,b.position,1.1,this.amb);
+    },4600);
+  },
+  /* 空间化音效：按物体相对镜头的位置计算声像与距离衰减 */
+  spatial(freq,vol,pos,len=1.4,dest=this.sfx){
+    if(!this.ctx||!pos) return;
+    const dx=pos.x-camera.position.x, dz=pos.z-camera.position.z, dist=Math.hypot(dx,dz);
+    let panVal=0;
+    if(dist>.01){
+      const right=new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld,0);
+      panVal=Math.max(-.9,Math.min(.9,(dx*right.x+dz*right.z)/dist));
+    }
+    const att=1/(1+dist*.045);
+    const p=this.ctx.createStereoPanner?this.ctx.createStereoPanner():null;
+    let target=dest;
+    if(p){ p.pan.value=panVal; p.connect(dest); target=p; }
+    this.bell(freq,vol*att,target,len);
+  },
+  bell(freq,vol,dest,len=2){
+    const ctx=this.ctx,t=ctx.currentTime;
+    [1,2.01,3.02].forEach((h,i)=>{
+      const o=ctx.createOscillator(),g=ctx.createGain(); o.type='sine'; o.frequency.value=freq*h;
+      g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(vol/(i+1),t+.015);
+      g.gain.exponentialRampToValueAtTime(.0001,t+len/(1+i*.5));
+      o.connect(g); g.connect(dest); o.start(t); o.stop(t+len+.1);
+    });
+  },
+  click(kind='soft'){
+    if(!this.ctx||!STATE.sfx) return;
+    const ctx=this.ctx,t=ctx.currentTime;
+    if(t-(this.lastSfx||0)<.07) return;   // 连点节流，避免爆音（借鉴 pandora-forest.html）
+    this.lastSfx=t;
+    this.bell(kind==='flower'?880:kind==='pali'?330:523.25, .16, this.sfx, kind==='pali'?1:1.6);
+    const s=ctx.createBufferSource(); s.buffer=this.noise(.2);
+    const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=kind==='pali'?380:1600; bp.Q.value=1.2;
+    const g=ctx.createGain(); g.gain.setValueAtTime(.1,t); g.gain.exponentialRampToValueAtTime(.0001,t+.18);
+    s.connect(bp); bp.connect(g); g.connect(this.sfx); s.start(t); s.stop(t+.2);
+  },
+  set(m,a,s){
+    if(!this.ctx) return; const t=this.ctx.currentTime;
+    this.music.gain.setTargetAtTime(m?.55:0,t,.6);
+    this.amb.gain.setTargetAtTime(a?.85:0,t,.6);
+    this.sfx.gain.setTargetAtTime(s?.9:0,t,.2);
+  },
+  resume(){ if(this.ctx&&this.ctx.state==='suspended') this.ctx.resume(); }
+};
+
+/* =========================================================
+   6. 交互：点击图鉴、按钮、悬停
+   ========================================================= */
+const STATE={music:true,amb:true,sfx:true,fog:true,auto:false};
+const FOG_NIGHT=0x103a34, FOG_DAY=0x2c6652;
+let night=true, glowBase=.85, flowerBase=.6, bugBase=.6, haloBase=.5;
+function setNight(v){
+  night=v;
+  skyMat.uniforms.top.value.set(v?0x0a2c33:0x2a6f8a);
+  skyMat.uniforms.bottom.value.set(v?0x1e5147:0x9fd6b0);
+  if(scene.fog) scene.fog.color.set(v?FOG_NIGHT:FOG_DAY);
+  hemi.color.set(v?0x9ce8cc:0xd8ffe2); hemi.intensity=v?1.5:2.0;
+  moon.color.set(v?0xdaf6e8:0xffe6b8); moon.intensity=v?1.85:2.6;
+  rim.intensity=v?.7:.35;
+  bloom.strength=v?.5:.28;
+  renderer.toneMappingExposure=v?1.35:1.2;
+  leafMat.emissiveIntensity=v?.5:.18;
+  ferns.material.emissiveIntensity=v?.35:.12;
+  glowBase=v?.85:.4; flowerBase=v?.6:.3; bugBase=v?.6:.28;
+  haloBase=v?.5:.3;
+  moonHalo.material.color.set(v?0xcffff0:0xfff4d6);
+  godrays.forEach(g=>g.mat.uniforms.uOpacity.value=g.baseOpacity*(v?1:.35));
+  if(waterUniforms) waterUniforms.uColorB.value.set(v?0x7ffbe4:0x9ff0ff);
+  document.getElementById('b-daynight').textContent=v?'☾ 切换昼夜':'☀ 切换昼夜';
+}
+const card=document.getElementById('card'), cname=document.getElementById('cname'), clatin=document.getElementById('clatin'), cdesc=document.getElementById('cdesc');
+const tag=document.getElementById('tag');
+const mousePlane=new THREE.Plane(new THREE.Vector3(0,1,0),-4), mouseWorld=new THREE.Vector3(9999,9999,9999);
+const ray=new THREE.Raycaster(), mouse=new THREE.Vector2();
+let downX=0,downY=0,selected=null;
+
+/* 点击处迸发的一小簇荧光，1.4 秒后消散 */
+const bursts=[];
+function spawnBurst(point,color){
+  const n=24,pos=new Float32Array(n*3),vel=[];
+  for(let i=0;i<n;i++){
+    pos.set([point.x,point.y,point.z],i*3);
+    vel.push(new THREE.Vector3(RR(-1,1),RR(.2,1.4),RR(-1,1)).normalize().multiplyScalar(RR(.6,2.2)));
+  }
+  const geo=new THREE.BufferGeometry(); geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  const pts=new THREE.Points(geo,new THREE.PointsMaterial({size:.38,map:glowMap,color:color||0x9fffe0,transparent:true,opacity:1,depthWrite:false,blending:THREE.AdditiveBlending}));
+  scene.add(pts); bursts.push({pts,vel,life:0});
+}
+
+function showInfo(info,obj,point){
+  cname.textContent=info.name; clatin.textContent=info.latin; cdesc.textContent=info.desc;
+  card.classList.add('show');
+  if(selected&&selected.userData&&selected.userData.baseScale) selected.scale.copy(selected.userData.baseScale);
+  selected=obj;
+  if(obj){
+    obj.userData.baseScale=obj.scale.clone();
+    const f=info===INFO.flower?880:info===INFO.pali?330:info===INFO.spiral?740:523.25;
+    if(point&&STATE.sfx) Sound.spatial(f,.18,point,1.6);
+    else Sound.click(info===INFO.flower?'flower':info===INFO.pali?'pali':'soft');
+  }
+}
+renderer.domElement.addEventListener('pointerdown',e=>{downX=e.clientX;downY=e.clientY;Sound.resume();finishIntro();});
+renderer.domElement.addEventListener('pointerup',e=>{
+  if(Math.hypot(e.clientX-downX,e.clientY-downY)>6) return;
+  mouse.set(e.clientX/innerWidth*2-1, -(e.clientY/innerHeight)*2+1);
+  ray.setFromCamera(mouse,camera);
+  const hit=ray.intersectObjects(interactives,false)[0];
+  if(hit){ let o=hit.object; const info=o.userData.info;
+    if(info){ showInfo(info,o.userData.owner||o,hit.point); spawnBurst(hit.point, info===INFO.flower?0xffd9a0:info===INFO.pali?0xffc9a8:0x9fffe0); }
+    if(o.userData.spiral) o.userData.spiral.target=1;
+  }
+  else { card.classList.remove('show'); if(selected&&selected.userData.baseScale) selected.scale.copy(selected.userData.baseScale); selected=null; }
+});
+renderer.domElement.addEventListener('pointermove',e=>{
+  mouse.set(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);
+  ray.setFromCamera(mouse,camera);
+  ray.ray.intersectPlane(mousePlane,mouseWorld);
+  const h=ray.intersectObjects(interactives,false)[0], info=h&&h.object.userData.info;
+  renderer.domElement.style.cursor = info?'pointer':'auto';
+  if(info){ tag.innerHTML=info.name+'<span>'+info.latin+'</span>'; tag.classList.add('show'); }
+  else tag.classList.remove('show');
+});
+
+function bind(id,key,labelOn,labelOff,fn){
+  const b=document.getElementById(id);
+  b.onclick=()=>{ STATE[key]=!STATE[key]; b.classList.toggle('off',!STATE[key]);
+    b.textContent=STATE[key]?labelOn:labelOff; if(fn) fn(STATE[key]); Sound.click(); };
+}
+bind('b-music','music','♪ 背景乐','♪ 背景乐',v=>Sound.set(v,STATE.amb,STATE.sfx));
+bind('b-amb','amb','≈ 环境音','≈ 环境音',v=>Sound.set(STATE.music,v,STATE.sfx));
+bind('b-sfx','sfx','◈ 交互音','◈ 交互音',v=>Sound.set(STATE.music,STATE.amb,v));
+bind('b-fog','fog','◌ 雾气','◌ 雾气',v=>scene.fog=v?new THREE.FogExp2(night?FOG_NIGHT:FOG_DAY,.011):null);
+document.getElementById('b-daynight').onclick=()=>{ setNight(!night); Sound.click(); };
+bind('b-auto','auto','↻ 自动巡游','↻ 自动巡游',v=>controls.autoRotate=v);
+document.getElementById('b-reset').onclick=()=>{
+  controls.reset(); camera.position.set(0,8,12); controls.target.set(0,5,0); controls.update();
+  card.classList.remove('show'); Sound.click();
+};
+
+/* 进入时的电影式推镜：由远及近，缓入缓出 */
+let intro=0;
+const INTRO_DUR=3.8;
+function finishIntro(){
+  if(!intro) return;
+  intro=0; controls.enabled=true;
+  camera.position.set(0,8,12); controls.target.set(0,5,0); controls.update();
+}
+document.getElementById('enter').onclick=()=>{
+  document.getElementById('gate').classList.add('hide');
+  Sound.init();
+  intro=.0001; controls.enabled=false;
+  barsTarget=1;
+  const sub=document.getElementById('subtitle');
+  sub.classList.add('show');
+  setTimeout(()=>sub.classList.remove('show'),4600);
+  setTimeout(()=>{document.getElementById('gate').style.display='none';},900);
+};
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight);
+});
+addEventListener('dblclick',()=>{
+  if(!document.fullscreenElement) document.documentElement.requestFullscreen();
+  else document.exitFullscreen();
+});
+
+/* =========================================================
+   7. 动画循环
+   ========================================================= */
+/* 性能分级：0 低 / 1 中 / 2 高。自动模式下按帧率升降档 */
+const Q_NAMES=['低','中','高'];
+let qLevel=2, qAuto=true, fpsAcc=0, fpsFrames=0, qCooldown=3;
+function applyQuality(l){
+  qLevel=l;
+  const dpr=Math.min(devicePixelRatio,2);
+  const pr=[Math.min(dpr,.75),Math.min(dpr,1),dpr][l];
+  renderer.setPixelRatio(pr); composer.setPixelRatio(pr);
+  renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight);
+  bokeh.enabled = l===2;
+  bloom.enabled = l>=1;
+  renderer.shadowMap.enabled = l>=1;
+  const ms=[512,1024,2048][l];
+  if(moon.shadow.mapSize.x!==ms){ moon.shadow.mapSize.set(ms,ms); if(moon.shadow.map){ moon.shadow.map.dispose(); moon.shadow.map=null; } }
+  scene.traverse(o=>{ if(o.material) o.material.needsUpdate=true; });
+  // 低档减少点云与粒子渲染量
+  dustPts.visible = l>=1;
+  falling.visible = l>=1;
+  updateQBtn();
+}
+function updateQBtn(){
+  document.getElementById('b-quality').textContent='◐ 画质：'+(qAuto?'自动·':'')+Q_NAMES[qLevel];
+}
+document.getElementById('b-quality').onclick=()=>{
+  // 循环：自动 → 高 → 中 → 低 → 自动
+  if(qAuto){ qAuto=false; applyQuality(2); }
+  else if(qLevel>0) applyQuality(qLevel-1);
+  else { qAuto=true; qCooldown=3; fpsAcc=0; fpsFrames=0; updateQBtn(); }
+  Sound.click();
+};
+function autoQuality(dt){
+  if(!qAuto||document.hidden) return;
+  fpsAcc+=dt; fpsFrames++;
+  if(fpsAcc<2) return;                    // 每 2 秒评估一次
+  const fps=fpsFrames/fpsAcc; fpsAcc=0; fpsFrames=0;
+  if(qCooldown>0){ qCooldown--; return; } // 切档后/启动时先稳定几轮
+  if(fps<40 && qLevel>0){ applyQuality(qLevel-1); qCooldown=2; }
+  else if(fps>58 && qLevel<2){ applyQuality(qLevel+1); qCooldown=4; }
+}
+updateQBtn();
+
+const timer=new THREE.Timer(); timer.connect(document); let time=0;
+const tmp=new THREE.Object3D();
+
+function animate(){
+  requestAnimationFrame(animate);
+  timer.update();
+  const dt=Math.min(timer.getDelta(),.05); time+=dt;
+  autoQuality(dt);
+  if(intro>0){
+    intro+=dt/INTRO_DUR;
+    const k=Math.min(1,intro), e=k<.5?4*k*k*k:1-Math.pow(-2*k+2,3)/2;
+    camera.position.set(10*(1-e)+Math.sin(e*Math.PI)*4, 16-8*e+Math.sin(e*Math.PI)*1.5, 50-38*e);
+    controls.target.set(0,5,0);
+    camera.lookAt(controls.target);
+    if(k>=1){ intro=0; controls.enabled=true; controls.update(); }
+  } else {
+    controls.update(dt);
+    camera.fov=55+.45*Math.sin(time*.5);   // 极轻微"呼吸"，增强临场感
+    camera.updateProjectionMatrix();
+    // 手持摄影机微晃：多频叠加的细小位移
+    camera.position.y+=(Math.sin(time*.9)*.6+Math.sin(time*2.3)*.25)*.004;
+  }
+  // 景深焦点追随观察目标；宽银幕遮幅平滑过渡
+  bokeh.uniforms.focus.value=camera.position.distanceTo(controls.target);
+  grade.uniforms.uTime.value=time;
+  grade.uniforms.uAspect.value=innerWidth/innerHeight;
+  grade.uniforms.uBars.value+=(barsTarget-grade.uniforms.uBars.value)*.04;
+
+  // 缓慢的风阵：所有植物共享同一“呼吸”包络
+  const gust=.5+.5*Math.sin(time*.21)*Math.sin(time*.073+1.4);
+  windTime.value=time;
+  skyMat.uniforms.uTime.value=time;
+
+  // 体积光：光柱轻微摇曳、节律明灭
+  for(const g of godrays){
+    g.mesh.rotation.z=-.18+Math.sin(time*.12+g.phase)*.02;
+    g.mat.uniforms.uTime.value=time;
+  }
+  // 月光光晕：柔和呼吸
+  moonHalo.material.opacity=haloBase+.06*Math.sin(time*.6);
+  // 溪流流动
+  if(waterUniforms) waterUniforms.uTime.value=time;
+  // 流光蝶：绕花丛翩跹、振翅
+  for(const b of butterflies){
+    const u=b.userData, a=u.phase+time*u.spd;
+    b.position.set(u.cx+Math.cos(a*1.7)*1.6, u.y+Math.sin(time*1.8+u.phase)*.5, u.cz+Math.sin(a*1.3)*1.6);
+    b.rotation.y=-a+Math.PI/2;
+    const flap=Math.sin(time*u.flap)*.9;
+    u.wl.rotation.y=flap; u.wr.rotation.y=-flap;
+  }
+
+  // 蕨叶随风
+  for(let i=0;i<fernData.length;i++){
+    const f=fernData[i];
+    tmp.position.set(f.x,f.y,f.z);
+    tmp.rotation.set(Math.sin(time*1.1+f.phase)*.13*(1+gust*.9), f.rot, Math.sin(time*1.6+f.phase)*.16*(1+gust*.7));
+    tmp.scale.setScalar(f.s); tmp.updateMatrix(); ferns.setMatrixAt(i,tmp.matrix);
+  }
+  ferns.instanceMatrix.needsUpdate=true;
+
+  // 树冠轻摆 + 冠层孢子明灭
+  for(const t of trees){
+    const u=t.userData, w=Math.sin(time*.55+u.sway)*.012*(1+gust*.8);
+    u.canopies.forEach((c,i)=>{ c.rotation.z=w+i*.004; c.rotation.x=Math.cos(time*.45+u.sway+i)*.008; });
+    u.spore.material.opacity=.55+.3*(.5+.5*Math.sin(time*.7+u.sway));
+  }
+
+  // 飘落孢子
+  const fap=falling.geometry.attributes.position.array;
+  for(let i=0;i<fallCount;i++){
+    const d=fallData[i];
+    d.y-=d.speed*dt*(1+gust*.4);
+    if(d.y<.2) d.y=RR(16,20);
+    fap[i*3]=d.x+Math.sin(time*.4+d.phase)*.6;
+    fap[i*3+1]=d.y;
+    fap[i*3+2]=d.z+Math.cos(time*.35+d.phase)*.6;
+  }
+  falling.geometry.attributes.position.needsUpdate=true;
+
+  // 雾气轻微起伏，像在呼吸
+  if(scene.fog) scene.fog.density=(night?.011:.009)*(1+.06*Math.sin(time*.17));
+
+  // 蘑菇呼吸
+  caps.material.emissiveIntensity=glowBase+.45*Math.sin(time*1.6);
+
+  // 地面薄雾漂移
+  for(const m of mists){
+    m.position.x+=Math.sin(time*.12+m.userData.phase)*.004;
+    m.position.z+=Math.cos(time*.1+m.userData.phase)*.004;
+    m.material.opacity=.04+.03*(.5+.5*Math.sin(time*.4+m.userData.phase));
+  }
+
+  // 花朵脉动
+  flowers.material.opacity=flowerBase+.3*(.5+.5*Math.sin(time*2.2));
+  flowers.material.size=.5+.12*Math.sin(time*2.2);
+
+  // 提灯虫游走
+  const bp=fireflies.geometry.attributes.position.array;
+  for(let i=0;i<bugCount;i++){
+    const b=bugs[i];
+    bp[i*3]=b.x+Math.sin(time*b.speed+b.phase)*b.ax;
+    bp[i*3+1]=b.y+Math.sin(time*b.speed*.7+b.phase)*.8;
+    bp[i*3+2]=b.z+Math.cos(time*b.speed*.8+b.phase)*b.ax;
+    // 鼠标靠近时排斥（借鉴 pandora-forest.html 的光羽虫）
+    const dx=bp[i*3]-mouseWorld.x,dy=bp[i*3+1]-mouseWorld.y,dz=bp[i*3+2]-mouseWorld.z;
+    const d2=dx*dx+dy*dy+dz*dz;
+    if(d2<16&&d2>.01){
+      const f=(16-d2)/16*.06,inv=1/Math.sqrt(d2);
+      b.vx+=dx*inv*f; b.vy+=dy*inv*f; b.vz+=dz*inv*f;
+    }
+    b.vx*=.94; b.vy*=.94; b.vz*=.94;
+    bp[i*3]+=b.vx; bp[i*3+1]+=b.vy; bp[i*3+2]+=b.vz;
+  }
+  fireflies.geometry.attributes.position.needsUpdate=true;
+  fireflies.material.opacity=bugBase+.25*Math.sin(time*3);
+
+  // 尘埃缓慢上升
+  { const dp=dustPts.geometry.attributes.position.array;
+    for(let i=0;i<dustCount;i++){ const d=dust[i];
+    dp[i*3+1]=d.y+Math.sin(time*d.speed+d.phase)*1.4+((time*.25)%8);
+    if(dp[i*3+1]>27) dp[i*3+1]-=27;
+  } dustPts.geometry.attributes.position.needsUpdate=true; }
+  // 圣树种子漂浮
+  for(let i=0;i<wsCount;i++){ const w=wsData[i];
+    w.y+=w.spd*dt*(.6+.4*Math.sin(time*1.3+w.phase)); if(w.y>12) w.y=.5;
+    wsPos[i*3]=w.x+Math.sin(time*.5+w.phase)*1.2; wsPos[i*3+1]=w.g+w.y; wsPos[i*3+2]=w.z+Math.cos(time*.4+w.phase)*1.2;
+  }
+  wsGeo.attributes.position.needsUpdate=true;
+  woodsprites.material.opacity=(night?.85:.35)+.15*Math.sin(time*2);
+
+  // 六足兽漫步
+  for(const p of pali){
+    const u=p.userData,a=u.phase+time*u.speed;
+    p.position.set(Math.cos(a)*u.radius, heightAt(Math.cos(a)*u.radius,Math.sin(a)*u.radius)+Math.sin(time*4)*.06, Math.sin(a)*u.radius);
+    p.rotation.y=Math.atan2(-Math.sin(a),Math.cos(a))+Math.PI/2;
+    for(const l of u.legs) l.mesh.rotation.x=Math.sin(time*3.2+l.phase)*.32;
+  }
+  // 翔鸟盘旋
+  for(const b of birds){
+    const u=b.userData,a=u.phase+time*u.speed;
+    b.position.set(Math.cos(a)*u.radius, u.height+Math.sin(time*.7+u.phase)*1.5, Math.sin(a)*u.radius);
+    b.rotation.y=Math.atan2(-Math.sin(a),Math.cos(a))+Math.PI/2;
+    for(const w of u.wings) w.m.rotation.x=w.s*(.25+Math.sin(time*9+u.phase)*.55);
+  }
+  // 选中物体呼吸高亮
+  if(selected&&selected.userData.baseScale){
+    const s=1+.05*Math.sin(time*5); selected.scale.copy(selected.userData.baseScale).multiplyScalar(s);
+  }
+  // 悬浮山起伏
+  islands.forEach((s,i)=>{
+    s.group.position.y=s.baseY+Math.sin(time*(i?.4:.5)+i*2)*1.5;
+    s.group.rotation.y+=i?.0005:-.0006;
+  });
+  // 螺旋花：触碰卷曲后缓缓舒展
+  spirals.forEach(s=>{
+    s.coil+=(s.target-s.coil)*.12; s.target*=.965; if(s.target<.02) s.target=0;
+    s.tube.scale.y=1-s.coil*.72; s.core.scale.setScalar(1+s.coil*.9);
+    s.mat.emissiveIntensity=1.05+Math.sin(time*1.4+s.phase)*.25+s.coil*1.3;
+    s.tube.rotation.z=Math.sin(time*.8+s.phase)*.07;
+  });
+  // 伊卡兰：远空滑翔
+  ikrans.forEach(k=>{
+    const a=k.phase+time*k.spd;
+    k.group.position.set(Math.cos(a)*k.r,k.y+Math.sin(a*2)*2.5,-55+Math.sin(a)*k.r);
+    k.group.rotation.y=-a+Math.PI/2;
+    const flap=Math.sin(time*1.6+k.phase)*.22;
+    k.wl.rotation.z=flap; k.wr.rotation.z=-flap;
+  });
+
+  // 点击迸发的荧光粒子
+  for(let i=bursts.length-1;i>=0;i--){
+    const b=bursts[i]; b.life+=dt;
+    const arr=b.pts.geometry.attributes.position.array;
+    for(let j=0;j<b.vel.length;j++){
+      arr[j*3]+=b.vel[j].x*dt;
+      arr[j*3+1]+=(b.vel[j].y-1.2*b.life)*dt;
+      arr[j*3+2]+=b.vel[j].z*dt;
+    }
+    b.pts.geometry.attributes.position.needsUpdate=true;
+    b.pts.material.opacity=Math.max(0,1-b.life/1.4);
+    if(b.life>1.4){ scene.remove(b.pts); b.pts.geometry.dispose(); b.pts.material.dispose(); bursts.splice(i,1); }
+  }
+  composer.render();
+}
+animate();
+
+/* 资源加载兜底提示 */
+setTimeout(()=>{ if(!renderer.info.render.frame) document.getElementById('loaderr').style.display='flex'; },4000);
+</script>
+</body>
+</html>
